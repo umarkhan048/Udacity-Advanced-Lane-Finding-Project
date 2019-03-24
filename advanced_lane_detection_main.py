@@ -7,8 +7,8 @@ from moviepy.editor import VideoFileClip
 
 objpoints = []
 imgpoints = []
-left_fit_poly = 0
-right_fit_poly = 0
+left_fit_poly = []
+right_fit_poly = []
 
 
 # nx and ny define the number of corners in x and y direction
@@ -22,22 +22,25 @@ objp[:, :2] = np.mgrid[0:9, 0:6].T.reshape(-1, 2)
 
 for fname in images:
 
+    # for each chessboard image, gray scale conversion is done
+    # the opencv function findChessboardCorners is used to detect corners
     img = mpimg.imread(fname)
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     ret, corners = cv2.findChessboardCorners(gray, (9, 6), None)
 
-    if ret == True:
+    if ret:
         imgpoints.append(corners)
         objpoints.append(objp)
 
-        img = cv2.drawChessboardCorners(img, (9, 6), corners, ret)
+        # img = cv2.drawChessboardCorners(img, (9, 6), corners, ret)
 
 ret, mtx, dist, rvecs, tvecs = cv2.calibrateCamera(objpoints, imgpoints, gray.shape[::-1], None, None)
 
 
-def undistort_image(img, mtx, dist):
+def undistort_image(img_in, mtx_in, dist_in):
 
-    dst = cv2.undistort(img, mtx, dist, None, mtx)
+    # This is the function which undistorts using the calibration parameters
+    dst = cv2.undistort(img_in, mtx_in, dist_in, None, mtx_in)
     return dst
 
 
@@ -45,30 +48,36 @@ def create_threshold_binary_image(undist_img):
 
     # RGB to HLS Conversion
     hls = cv2.cvtColor(undist_img, cv2.COLOR_RGB2HLS)
-    s_channel = hls[:, :, 2]
 
-    gray_undist = cv2.cvtColor(undist_img, cv2.COLOR_RGB2GRAY)
+    # using s channel and applying thresholds for lane detection
+    s_channel = hls[:, :, 2]
+    thresh_s_ch = (100, 255)    # Threshold values found by testing
+    s_ch_binary = np.zeros_like(s_channel)
+    s_ch_binary[(s_channel >= thresh_s_ch[0]) & (s_channel <= thresh_s_ch[1])] = 1
 
     # Sobel operator is applied to the undistorted gray image in x direction
-    sobelx = cv2.Sobel(gray_undist, cv2.CV_64F, 1, 0)
-    abs_sobelx = np.absolute(sobelx)
-    scaled_sobel = np.uint8(255 * abs_sobelx / np.max(abs_sobelx))
-
-    min_th = 20
-    max_th = 100
-
+    # The sudden changes in image pixels are detected
+    gray_undist = cv2.cvtColor(undist_img, cv2.COLOR_RGB2GRAY)
+    sobel_kernel = 5
+    sobelx = cv2.Sobel(gray_undist, cv2.CV_64F, 1, 0, ksize=sobel_kernel)
+    abs_sobel = np.absolute(sobelx)
+    scaled_sobel = np.uint8(255 * abs_sobel / np.max(abs_sobel))
+    thresh_sobel = (20, 100)    # Threshold values are found by testing
     sobel_x_binary = np.zeros_like(scaled_sobel)
-    sobel_x_binary[(scaled_sobel >= min_th) & (scaled_sobel <= max_th)] = 1
+    sobel_x_binary[(scaled_sobel >= thresh_sobel[0]) & (scaled_sobel <= thresh_sobel[1])] = 1
 
-    min_th_s = 170
-    max_th_s = 255
-    s_ch_binary = np.zeros_like(s_channel)
-    s_ch_binary[(s_channel >= min_th_s) & (s_channel <= max_th_s)] = 1
+    # After some testing, it was found that in some specific situations, the r-channel
+    # does a better job of detecting right lanes than s channel, specially when light
+    # colored road patches are in the frame.
+    r_channel = undist_img[:, :, 0]
+    thresh_r = (220, 255)   # Threshold values are found by testing
+    binary_r = np.zeros_like(r_channel)
+    binary_r[(r_channel > thresh_r[0]) & (r_channel <= thresh_r[1])] = 1
 
-    # color_binary = np.dstack((np.zeros_like(sobel_x_binary), sobel_x_binary, s_ch_binary)) * 255
+    # Creating a combined image with sobel, binary red and s channel binary
     combined_binary = np.zeros_like(sobel_x_binary)
-    combined_binary[(s_ch_binary == 1) | (sobel_x_binary == 1)] = 1
-    return combined_binary, h_channel, l_channel
+    combined_binary[(sobel_x_binary == 1) | (binary_r == 1) | (s_ch_binary == 1)] = 1
+    return combined_binary
 
 
 def perspective_transform(cmb_bin_img):
@@ -87,6 +96,7 @@ def perspective_transform(cmb_bin_img):
          [320, 720],
          [960, 0]])
 
+    # Getting perspective transform matrix and warping the image
     M = cv2.getPerspectiveTransform(src, dst)
     Minv = cv2.getPerspectiveTransform(dst, src)
     image_size = (cmb_bin_img.shape[1], cmb_bin_img.shape[0])
@@ -98,6 +108,7 @@ def find_lane_pixels(img_warped):
 
     # The histogram of the lower bottom of the image is taken.
     # High values in the histogram point towards lanes in those regions
+    # Lane lines are likely to be mostly vertical nearest to the car
     bottom_half = img_warped[img_warped.shape[0] // 2:, :]
     histogram = np.sum(bottom_half, axis=0)
     out_img = np.dstack((img_warped, img_warped, img_warped))*255
@@ -106,40 +117,52 @@ def find_lane_pixels(img_warped):
     right_x_base = np.argmax(histogram[mid_point:]) + mid_point
 
     # Sliding windows method is used to find lanes
-    nwindows = 15
-    margin = 70
-    minpix = 50
+    nwindows = 9   # Number of sliding windows
+    margin = 80     # Width of the window
+    minpix = 50     # Minimum number of pixels to be found to recenter window
 
+    # Size of each window is image height divided by number of windows
     win_height = np.int(img_warped.shape[0]//nwindows)
     non_zero_pixels = img_warped.nonzero()
     non_zero_y = np.array(non_zero_pixels[0])
     non_zero_x = np.array(non_zero_pixels[1])
 
+    # Current position to be updated later for each window
     left_x_current = left_x_base
     right_x_current = right_x_base
 
+    # Empty lists to receive the indices of left and right lane pixels
     left_lane_inds = []
     right_lane_inds = []
 
+    # Step through the windows one by one
     for window in range(nwindows):
+
+        # Upper and lower boundaries of the window
         win_y_low = img_warped.shape[0] - (window + 1) * win_height
         win_y_high = img_warped.shape[0] - window * win_height
+
+        # left and right boundaries of the window
         win_xleft_low = left_x_current - margin
         win_xleft_high = left_x_current + margin
         win_xright_low = right_x_current - margin
         win_xright_high = right_x_current + margin
 
+        # Draw the windows on te visualization image
         cv2.rectangle(out_img, (win_xleft_low, win_y_low), (win_xleft_high, win_y_high), (0, 255, 0), 2)
         cv2.rectangle(out_img, (win_xright_low, win_y_low),(win_xright_high, win_y_high), (0, 255, 0), 2)
 
+        # Identifying non zero pixel  in x and y within the window
         good_left_inds = ((non_zero_y >= win_y_low) & (non_zero_y < win_y_high) &
                           (non_zero_x >= win_xleft_low) & (non_zero_x < win_xleft_high)).nonzero()[0]
         good_right_inds = ((non_zero_y >= win_y_low) & (non_zero_y < win_y_high) &
                            (non_zero_x >= win_xright_low) & (non_zero_x < win_xright_high)).nonzero()[0]
 
+        # Appending the indices to the lists
         left_lane_inds.append(good_left_inds)
         right_lane_inds.append(good_right_inds)
 
+        # Recenter the upcoming window if minpix number of pixels are found
         if len(good_left_inds) > minpix:
             left_x_current = np.int(np.mean(non_zero_x[good_left_inds]))
         if len(good_right_inds) > minpix:
@@ -148,6 +171,7 @@ def find_lane_pixels(img_warped):
     left_lane_inds = np.concatenate(left_lane_inds)
     right_lane_inds = np.concatenate(right_lane_inds)
 
+    # Extract left and right line pixel positions
     left_x = non_zero_x[left_lane_inds]
     left_y = non_zero_y[left_lane_inds]
     right_x = non_zero_x[right_lane_inds]
@@ -158,15 +182,23 @@ def find_lane_pixels(img_warped):
 
 def fit_polynomial(transformed_img):
 
+    # the pixel where non zero values are found are returned
     left_x, left_y, right_x, right_y, out_img = find_lane_pixels(transformed_img)
+
+    # polynomial coefficients for left and right lanes are found and lines are created
     left_fit = np.polyfit(left_y, left_x, 2)
     right_fit = np.polyfit(right_y, right_x, 2)
     ploty = np.linspace(0, transformed_img.shape[0] - 1, transformed_img.shape[0])
+
+    # Using the polynomial coefficients found from above, the left and right lane
+    # points are found
     left_fit_x = left_fit[0] * ploty ** 2 + left_fit[1] * ploty + left_fit[2]
     right_fit_x = right_fit[0] * ploty ** 2 + right_fit[1] * ploty + right_fit[2]
 
-    # Update previous poly
+    # Update previous poly - in this case they will be updated from zero
+    global left_fit_poly
     left_fit_poly = left_fit
+    global right_fit_poly
     right_fit_poly = right_fit
 
     # Visualization ##
@@ -175,19 +207,24 @@ def fit_polynomial(transformed_img):
     out_img[right_y, right_x] = [0, 0, 255]
 
     # Plots the left and right polynomials on the lane lines
-    plt.plot(left_fit_x, ploty, color='yellow')
-    plt.plot(right_fit_x, ploty, color='yellow')
+    # plt.plot(left_fit_x, ploty, color='yellow')
+    # plt.plot(right_fit_x, ploty, color='yellow')
 
     return out_img, left_fit_x, right_fit_x, ploty
 
 
 def search_around_polynomial(binary_warped, left_fit_prev, right_fit_prev):
+
+    # This the margin around previously found polynomial where lanes will be searched
     margin = 100
 
+    # Grab the activated pixels
     nonzero = binary_warped.nonzero()
     nonzeroy = np.array(nonzero[0])
     nonzerox = np.array(nonzero[1])
 
+    # Here the area of search based on activated x-values within the +/- margin
+    # of the previously found polynomial function is set
     left_lane_inds = ((nonzerox > (left_fit_prev[0]*(nonzeroy**2) + left_fit_prev[1]*nonzeroy +
                     left_fit_prev[2] - margin)) & (nonzerox < (left_fit_prev[0]*(nonzeroy**2) +
                     left_fit_prev[1]*nonzeroy + left_fit_prev[2] + margin)))
@@ -195,25 +232,32 @@ def search_around_polynomial(binary_warped, left_fit_prev, right_fit_prev):
                     right_fit_prev[2] - margin)) & (nonzerox < (right_fit_prev[0]*(nonzeroy**2) +
                     right_fit_prev[1]*nonzeroy + right_fit_prev[2] + margin)))
 
+    # Extract left and right lane activated pixels
     leftx = nonzerox[left_lane_inds]
     lefty = nonzeroy[left_lane_inds]
     rightx = nonzerox[right_lane_inds]
     righty = nonzeroy[right_lane_inds]
 
+    # Fit new polynomial
     left_fit = np.polyfit(lefty, leftx, 2)
     right_fit = np.polyfit(righty, rightx, 2)
     ploty = np.linspace(0, binary_warped.shape[0] - 1, binary_warped.shape[0])
+
+    # Using polynomial coefficients from above, left and right lane points are found
     left_fit_x = left_fit[0] * ploty ** 2 + left_fit[1] * ploty + left_fit[2]
     right_fit_x = right_fit[0] * ploty ** 2 + right_fit[1] * ploty + right_fit[2]
 
     # Update array for previous polynomials
+    global left_fit_poly
     left_fit_poly = left_fit
+    global right_fit_poly
     right_fit_poly = right_fit
 
     # Visualization ##
     # Create an image to draw on and an image to show the selection window
     out_img = np.dstack((binary_warped, binary_warped, binary_warped)) * 255
     window_img = np.zeros_like(out_img)
+
     # Color in left and right line pixels
     out_img[nonzeroy[left_lane_inds], nonzerox[left_lane_inds]] = [255, 0, 0]
     out_img[nonzeroy[right_lane_inds], nonzerox[right_lane_inds]] = [0, 0, 255]
@@ -240,17 +284,49 @@ def search_around_polynomial(binary_warped, left_fit_prev, right_fit_prev):
     return result, left_fit_x, right_fit_x, ploty
 
 
-def sanity_checks():
-    # Check distance between lines
+def sanity_checks(left_fit_x, right_fit_x, ploty):
+
+    xm_per_pix = 3.7/700
+
+    # Pick lowest points in the image for left and right sides and calculate distance
+    left_min = min(left_fit_x) * xm_per_pix
+    right_min = min(right_fit_x) * xm_per_pix
+
+    left_max = max(left_fit_x) * xm_per_pix
+    right_max = max(right_fit_x) * xm_per_pix
+
+    # Pick highest points in the image for the left and right sides and calculate distance
+
+    # If y coordinates are the same, the distance formula reduces to only x terms
+    distance_low = np.sqrt((right_min - left_min)**2)
+    distance_high = np.sqrt((right_max - left_max)**2)
+
+    # lower threshold for lane width
+    width_min_thr = 3.0
+    # upper threshold for lane width
+    width_max_thr = 3.8
+    if ((distance_low > width_min_thr and distance_low < width_max_thr) or (distance_high > width_min_thr and distance_high < width_max_thr)):
+        return True
+    else:
+        return False
+
+    # print(left_min)
+    # print(right_min)
+    # print(distance_low)
+    # print(left_max)
+    # print(right_max)
+    # print(distance_high)
+
     # Check if the lines are roughly parallel
     # Check similarity of curvature
-    pass
 
 
 def measure_curvature(ploty, left_x, right_x):
 
+    # Conversion from pixel to real dimensions
     ym_per_pix = 30/720
     xm_per_pix = 3.7/700
+
     left_fit = np.polyfit(ploty*ym_per_pix, left_x*xm_per_pix, 2)
     right_fit = np.polyfit(ploty*ym_per_pix, right_x*xm_per_pix, 2)
     print(left_fit)
@@ -262,7 +338,7 @@ def measure_curvature(ploty, left_x, right_x):
     return left_curverad, right_curverad, left_fit, right_fit
 
 
-def draw_on_image(warped_img, left_fitx, right_fitx, ploty, Minv, undist, image):
+def draw_on_image(warped_img, left_fitx, right_fitx, ploty, Minv, undist, image, frame_bool):
     # Create an image to draw the lines on
     warp_zero = np.zeros_like(warped_img).astype(np.uint8)
     color_warp = np.dstack((warp_zero, warp_zero, warp_zero))
@@ -273,7 +349,10 @@ def draw_on_image(warped_img, left_fitx, right_fitx, ploty, Minv, undist, image)
     pts = np.hstack((pts_left, pts_right))
 
     # Draw the lane onto the warped blank image
-    cv2.fillPoly(color_warp, np.int_([pts]), (0, 255, 0))
+    if frame_bool:
+        cv2.fillPoly(color_warp, np.int_([pts]), (0, 255, 0))
+    else:
+        cv2.fillPoly(color_warp, np.int_([pts]), (255, 0, 0))
 
     # Warp the blank back to original image space using inverse perspective matrix (Minv)
     newwarp = cv2.warpPerspective(color_warp, Minv, (image.shape[1], image.shape[0]))
@@ -284,56 +363,83 @@ def draw_on_image(warped_img, left_fitx, right_fitx, ploty, Minv, undist, image)
 
 def process_image(image):
 
+    # First the images are corrected for distortion
     undist = undistort_image(image, mtx, dist)
-    combined_binary_img, h_channel, l_channel = create_threshold_binary_image(undist)
+
+    # A sobel operator is applied as well as S channel is analyzed
+    # in the HLS representation to identify lanes. The image is scaled
+    # as binary
+    combined_binary_img = create_threshold_binary_image(undist)
+
+    # A trapezoid area is selected in front of the vehicle and warped
+    # to bird's eye view
     transformed_img, Minv = perspective_transform(combined_binary_img)
 
-    # Check if there is a previous polynomial otherwise calculate polynomial
-    if left_fit_poly == 0 and right_fit_poly == 0:
+    # if this is the first image, calculate polynomials from scratch i.e.
+    # analyze the whole image, if polynomials are available, limit the search
+    # area
+    if left_fit_poly == [] and right_fit_poly == []:
         polyfit_img, left_fit_x, right_fit_x, ploty = fit_polynomial(transformed_img)
 
     else:
         left_fit_prev = left_fit_poly
         right_fit_prev = right_fit_poly
-        polyfit_img, left_fit_x, right_fit_x = search_around_polynomial(transformed_img, left_fit_prev, right_fit_prev)
+        polyfit_img, left_fit_x, right_fit_x, ploty = search_around_polynomial(transformed_img, left_fit_prev, right_fit_prev)
+
+    # Perform sanity checks based on left and right lane points
+    frame_bool = sanity_checks(left_fit_x, right_fit_x, ploty)
+
+    if frame_bool:
+        result = draw_on_image(transformed_img, left_fit_x, right_fit_x, ploty, Minv, undist, image, frame_bool)
+        return result
+    else:
+        # For now, when the sanity check does not pass, an unprocessed undistored image is returned
+        # THIS IS A TEMPORARY SOLUTION
+        return undist
 
     # left_curve_radius, right_curve_radius, left_fit, right_fit = measure_curvature(ploty, left_fit_x, right_fit_x)
     # left_fit_array.append(left_fit)
     # right_fit_array.append(right_fit)
-    result = draw_on_image(transformed_img, left_fit_x, right_fit_x, ploty, Minv, undist, image)
-    return result
-    # print(left_curve_radius)
-    # print(right_curve_radius)
-    # plt.imshow(result)
-    # plt.show()
 
+# ************** Start of Test Image Section ************** #
 
-#test_img = mpimg.imread('test_images\\straight_lines1.jpg')
-#test_img = mpimg.imread('test_images\\straight_lines2.jpg')
-#test_img = mpimg.imread('test_images\\test1.jpg')
-#test_img = mpimg.imread('test_images\\test2.jpg')
-#test_img = mpimg.imread('test_images\\test3.jpg')
-#test_img = mpimg.imread('test_images\\test4.jpg')
-#test_img = mpimg.imread('test_images\\test5.jpg')
-#test_img = mpimg.imread('test_images\\test6.jpg')
+# Uncomment any one of the "test_img" line as well as the
+# last three lines of this section to work with test images
 
-#white_output = 'output_images\\project_video.mp4'
-#clip1 = VideoFileClip('project_video.mp4')
-#white_clip = clip1.fl_image(process_image)
-#white_clip.write_videofile(white_output, audio=False)
+# test_img = mpimg.imread('test_images\\straight_lines1.jpg')
+# test_img = mpimg.imread('test_images\\straight_lines2.jpg')
+# test_img = mpimg.imread('test_images\\test1.jpg')
+# test_img = mpimg.imread('test_images\\test2.jpg')
+# test_img = mpimg.imread('test_images\\test3.jpg')
+# test_img = mpimg.imread('test_images\\test4.jpg')
+# test_img = mpimg.imread('test_images\\test5.jpg')
+# test_img = mpimg.imread('test_images\\test6.jpg')
 
+# result = process_image(test_img)
+# plt.imshow(result)
+# plt.show()
+
+# ************** End of Test Image Section **************** #
+
+# Uncomment next 5 lines for the project video
+white_output = 'output_images\\project_video.mp4'
+clip1 = VideoFileClip('project_video.mp4')
+# new_clip = clip1.subclip(38, 45)
+white_clip = clip1.fl_image(process_image)
+white_clip.write_videofile(white_output, audio=False)
+
+# Uncomment next 4 lines for the challenge video
+# Please note that the pipeline is not yet optimized for challenge videos
 # white_output = 'output_images\\challenge_video.mp4'
 # clip1 = VideoFileClip('challenge_video.mp4')
 # white_clip = clip1.fl_image(process_image)
 # white_clip.write_videofile(white_output, audio=False)
 
+# Uncomment next 4 lines for the harder challenge video
+# Please note that the pipeline is not yet optimized for challenge videos
 # white_output = 'output_images\\harder_challenge_video.mp4'
 # clip1 = VideoFileClip('harder_challenge_video.mp4')
 # white_clip = clip1.fl_image(process_image)
 # white_clip.write_videofile(white_output, audio=False)
-
-# result = process_image(test_img)
-# plt.imshow(result)
-# plt.show()
 
 
