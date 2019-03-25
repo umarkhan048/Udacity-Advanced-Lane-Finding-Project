@@ -5,11 +5,12 @@ import matplotlib.image as mpimg
 import glob
 from moviepy.editor import VideoFileClip
 
-objpoints = []
-imgpoints = []
+
 left_fit_poly = []
 right_fit_poly = []
 
+objpoints = []  # 3D points
+imgpoints = []  # 2D points
 
 # nx and ny define the number of corners in x and y direction
 nx = 9
@@ -33,6 +34,10 @@ for fname in images:
         objpoints.append(objp)
 
         # img = cv2.drawChessboardCorners(img, (9, 6), corners, ret)
+
+        ret, mtx, dist, rvecs, tvecs = cv2.calibrateCamera(objpoints, imgpoints, gray.shape[::-1], None, None)
+        dst = cv2.undistort(img, mtx, dist, None, mtx)
+        a=1
 
 ret, mtx, dist, rvecs, tvecs = cv2.calibrateCamera(objpoints, imgpoints, gray.shape[::-1], None, None)
 
@@ -408,25 +413,25 @@ def process_image(image):
 
 # test_img = mpimg.imread('test_images\\straight_lines1.jpg')
 # test_img = mpimg.imread('test_images\\straight_lines2.jpg')
-# test_img = mpimg.imread('test_images\\test1.jpg')
+test_img = mpimg.imread('test_images\\test1.jpg')
 # test_img = mpimg.imread('test_images\\test2.jpg')
 # test_img = mpimg.imread('test_images\\test3.jpg')
 # test_img = mpimg.imread('test_images\\test4.jpg')
 # test_img = mpimg.imread('test_images\\test5.jpg')
 # test_img = mpimg.imread('test_images\\test6.jpg')
 
-# result = process_image(test_img)
-# plt.imshow(result)
-# plt.show()
+result = process_image(test_img)
+plt.imshow(result)
+plt.show()
 
 # ************** End of Test Image Section **************** #
 
 # Uncomment next 5 lines for the project video
-white_output = 'output_images\\project_video.mp4'
-clip1 = VideoFileClip('project_video.mp4')
-# new_clip = clip1.subclip(38, 45)
-white_clip = clip1.fl_image(process_image)
-white_clip.write_videofile(white_output, audio=False)
+# white_output = 'output_images\\project_video.mp4'
+# clip1 = VideoFileClip('project_video.mp4')
+# # new_clip = clip1.subclip(38, 45)
+# white_clip = clip1.fl_image(process_image)
+# white_clip.write_videofile(white_output, audio=False)
 
 # Uncomment next 4 lines for the challenge video
 # Please note that the pipeline is not yet optimized for challenge videos
