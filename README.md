@@ -28,8 +28,20 @@ The goals of this project are the following:
 
 By using provided chessboard images, camera calibration coefficients are calculated.
 
-The code for this step is contained in lines 12 through 37 of the file called `advanced_lane_detection_main.py`. The object points `objpoints` represent the 3D points whereas image points `imgpoints` represent the 2D points. The chessboard images are fixed on the (x, y) plane at z=0, such that the object points are the same for each calibration image. Thus, `objp` is just a replicated array of coordinates and `objpoints` will be appended with a copy of it every time the chessboard corners are successfully detected in a calibration image. The corners detected by the `cv2.findChessboardCorner` are appended to `imgpoints` with each successful detection of corners in a calibration image. The openCV functions `cv2.calibrateCamera` is used to find out the calibration and distortion coefficients. The resulting coefficients are used to undistort the images. For this purpose, `cv2.undistort` function is used. An example image for calibration correction for chessboard image as well as a road image are shown below:
+The code for this step is contained in lines 12 through 37 of the file called `advanced_lane_detection_main.py`. The object points `objpoints` represent the 3D points whereas image points `imgpoints` represent the 2D points. The chessboard images are fixed on the (x, y) plane at z=0, such that the object points are the same for each calibration image. Thus, `objp` is just a replicated array of coordinates and `objpoints` will be appended with a copy of it every time the chessboard corners are successfully detected in a calibration image. The corners detected by the `cv2.findChessboardCorner` are appended to `imgpoints` with each successful detection of corners in a calibration image. The openCV functions `cv2.calibrateCamera` is used to find out the calibration and distortion coefficients. The resulting coefficients are used to undistort the images. For this purpose, `cv2.undistort` function is used. An example image for calibration correction for chessboard image is shown below:
 
 ![Chessboard_Calibration_Example](./output_images/Chessboard_Calibration_Example.png)
 
-## UNDER CONSTRUCTION
+A few of the test images before and after distortion correction are shown below:
+
+![Road_Undistorted_1](./output_images/Undistorted_Images_Result/straight_lines1.png)
+![Road_Undistorted_2](./output_images/Undistorted_Images_Result/test1.png)
+![Road_Undistorted_3](./output_images/Undistorted_Images_Result/test3.png)
+
+## THE PROJECT IS CURRENTLY BEING WORKED ON
+
+To view the project video result for this commit, click here:
+
+[Project Video](/project_video_output.mp4)
+
+

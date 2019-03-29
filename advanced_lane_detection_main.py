@@ -35,10 +35,6 @@ for fname in images:
 
         # img = cv2.drawChessboardCorners(img, (9, 6), corners, ret)
 
-        ret, mtx, dist, rvecs, tvecs = cv2.calibrateCamera(objpoints, imgpoints, gray.shape[::-1], None, None)
-        dst = cv2.undistort(img, mtx, dist, None, mtx)
-        a=1
-
 ret, mtx, dist, rvecs, tvecs = cv2.calibrateCamera(objpoints, imgpoints, gray.shape[::-1], None, None)
 
 
@@ -56,7 +52,7 @@ def create_threshold_binary_image(undist_img):
 
     # using s channel and applying thresholds for lane detection
     s_channel = hls[:, :, 2]
-    thresh_s_ch = (100, 255)    # Threshold values found by testing
+    thresh_s_ch = (215, 255)    # Threshold values found by testing
     s_ch_binary = np.zeros_like(s_channel)
     s_ch_binary[(s_channel >= thresh_s_ch[0]) & (s_channel <= thresh_s_ch[1])] = 1
 
@@ -75,7 +71,7 @@ def create_threshold_binary_image(undist_img):
     # does a better job of detecting right lanes than s channel, specially when light
     # colored road patches are in the frame.
     r_channel = undist_img[:, :, 0]
-    thresh_r = (220, 255)   # Threshold values are found by testing
+    thresh_r = (210, 255)   # Threshold values are found by testing
     binary_r = np.zeros_like(r_channel)
     binary_r[(r_channel > thresh_r[0]) & (r_channel <= thresh_r[1])] = 1
 
@@ -215,13 +211,13 @@ def fit_polynomial(transformed_img):
     # plt.plot(left_fit_x, ploty, color='yellow')
     # plt.plot(right_fit_x, ploty, color='yellow')
 
-    return out_img, left_fit_x, right_fit_x, ploty
+    return out_img, left_fit_x, right_fit_x, ploty, left_fit, right_fit
 
 
 def search_around_polynomial(binary_warped, left_fit_prev, right_fit_prev):
 
     # This the margin around previously found polynomial where lanes will be searched
-    margin = 100
+    margin = 70
 
     # Grab the activated pixels
     nonzero = binary_warped.nonzero()
@@ -286,10 +282,12 @@ def search_around_polynomial(binary_warped, left_fit_prev, right_fit_prev):
     plt.plot(right_fit_x, ploty, color='yellow')
     # End visualization steps ##
 
-    return result, left_fit_x, right_fit_x, ploty
+    return result, left_fit_x, right_fit_x, ploty, left_fit, right_fit
 
 
 def sanity_checks(left_fit_x, right_fit_x, ploty):
+
+    # Check if the lines are between 3 to 3.8 meters apart
 
     xm_per_pix = 3.7/700
 
@@ -309,38 +307,50 @@ def sanity_checks(left_fit_x, right_fit_x, ploty):
     # lower threshold for lane width
     width_min_thr = 3.0
     # upper threshold for lane width
-    width_max_thr = 3.8
+    width_max_thr = 4
+
     if ((distance_low > width_min_thr and distance_low < width_max_thr) or (distance_high > width_min_thr and distance_high < width_max_thr)):
         return True
     else:
         return False
 
-    # print(left_min)
-    # print(right_min)
-    # print(distance_low)
-    # print(left_max)
-    # print(right_max)
-    # print(distance_high)
+    # Check similarity of curvature
+    #left_line_rad, right_line_rad = measure_curvature(left_fit_x, right_fit_x, ploty)
 
     # Check if the lines are roughly parallel
-    # Check similarity of curvature
 
 
-def measure_curvature(ploty, left_x, right_x):
+def measure_curvature_dist(binary_warped, left_fit_in, right_fit_in):
 
     # Conversion from pixel to real dimensions
     ym_per_pix = 30/720
     xm_per_pix = 3.7/700
 
-    left_fit = np.polyfit(ploty*ym_per_pix, left_x*xm_per_pix, 2)
-    right_fit = np.polyfit(ploty*ym_per_pix, right_x*xm_per_pix, 2)
-    print(left_fit)
-    print(right_fit)
-    y_eval = np.max(ploty)
-    left_curverad = ((1 + (2 * left_fit[0] * y_eval + left_fit[1]) ** 2) ** 1.5) / np.absolute(2 * left_fit[0])
-    right_curverad = ((1 + (2 * right_fit[0] * y_eval + right_fit[1]) ** 2) ** 1.5) / np.absolute(2 * right_fit[0])
+    ploty = np.linspace(0, binary_warped.shape[0] - 1, binary_warped.shape[0])
 
-    return left_curverad, right_curverad, left_fit, right_fit
+    left_x = left_fit_in[0] * ploty ** 2 + left_fit_in[1] * ploty + left_fit_in[2]
+    right_x = right_fit_in[0] * ploty ** 2 + right_fit_in[1] * ploty + right_fit_in[2]
+
+    left_fit_cr = np.polyfit(ploty * ym_per_pix, left_x * xm_per_pix, 2)
+    right_fit_cr = np.polyfit(ploty * ym_per_pix, right_x * xm_per_pix, 2)
+
+    y_eval = np.max(ploty)
+
+    left_curverad = ((1 + (2 * left_fit_cr[0] * y_eval * ym_per_pix + left_fit_cr[1]) ** 2) ** 1.5) / np.absolute(
+        2 * left_fit_cr[0])
+    right_curverad = ((1 + (2 * right_fit_cr[0] * y_eval * ym_per_pix + right_fit_cr[1]) ** 2) ** 1.5) / np.absolute(
+        2 * right_fit_cr[0])
+
+    # Image Center (car position)
+    img_center = binary_warped.shape[1] / 2
+
+    # Lane center is the mid point at the highest value of y i.e. y_eval
+    lowest_left_lane = (left_fit_in[0] * y_eval)**2 + left_fit_in[1] * y_eval + left_fit_in[2]
+    lowest_right_lane =(right_fit_in[0] * y_eval)**2 + right_fit_in[1] * y_eval + right_fit_in[2]
+    lane_center = (lowest_right_lane + lowest_left_lane) / 2
+    dist_from_center = round((img_center - lane_center) * xm_per_pix, 3)
+
+    return (left_curverad + right_curverad)/2, dist_from_center
 
 
 def draw_on_image(warped_img, left_fitx, right_fitx, ploty, Minv, undist, image, frame_bool):
@@ -384,23 +394,38 @@ def process_image(image):
     # analyze the whole image, if polynomials are available, limit the search
     # area
     if left_fit_poly == [] and right_fit_poly == []:
-        polyfit_img, left_fit_x, right_fit_x, ploty = fit_polynomial(transformed_img)
+        polyfit_img, left_fit_x, right_fit_x, ploty, left_fit, right_fit = fit_polynomial(transformed_img)
 
     else:
         left_fit_prev = left_fit_poly
         right_fit_prev = right_fit_poly
-        polyfit_img, left_fit_x, right_fit_x, ploty = search_around_polynomial(transformed_img, left_fit_prev, right_fit_prev)
+        polyfit_img, left_fit_x, right_fit_x, ploty, left_fit, right_fit = search_around_polynomial(transformed_img, left_fit_prev, right_fit_prev)
+
+    avg_lane_curve, dist_center = measure_curvature_dist(transformed_img, left_fit, right_fit)
 
     # Perform sanity checks based on left and right lane points
     frame_bool = sanity_checks(left_fit_x, right_fit_x, ploty)
+    # return polyfit_img
+    result = draw_on_image(transformed_img, left_fit_x, right_fit_x, ploty, Minv, undist, image, frame_bool)
 
-    if frame_bool:
-        result = draw_on_image(transformed_img, left_fit_x, right_fit_x, ploty, Minv, undist, image, frame_bool)
-        return result
-    else:
-        # For now, when the sanity check does not pass, an unprocessed undistored image is returned
-        # THIS IS A TEMPORARY SOLUTION
-        return undist
+    # Write lane curvature on the frame
+    cv2.putText(result, 'Radius of curvature: ' + str(int(avg_lane_curve)) + 'm', (50, 50), cv2.FONT_HERSHEY_SIMPLEX,
+                1, (255, 255, 255), 2)
+    cv2.putText(result, 'Deviation from lane center: ' + str(dist_center) + 'm', (50, 100), cv2.FONT_HERSHEY_SIMPLEX,
+                1, (255, 255, 255), 2)
+    return result
+
+    # if frame_bool:
+    #     result = draw_on_image(transformed_img, left_fit_x, right_fit_x, ploty, Minv, undist, image, frame_bool)
+    #
+    #     # Write lane curvature on the frame
+    #     cv2.putText(result, 'Radius of curvature: ' + str(int(avg_lane_curve)) + 'm', (50, 50), cv2.FONT_HERSHEY_SIMPLEX,
+    #                 1, (255, 255, 255), 2)
+    #     return result
+    # else:
+    #     # For now, when the sanity check does not pass, an unprocessed undistorted image is returned
+    #     # THIS IS A TEMPORARY SOLUTION
+    #     return undist
 
     # left_curve_radius, right_curve_radius, left_fit, right_fit = measure_curvature(ploty, left_fit_x, right_fit_x)
     # left_fit_array.append(left_fit)
@@ -413,25 +438,31 @@ def process_image(image):
 
 # test_img = mpimg.imread('test_images\\straight_lines1.jpg')
 # test_img = mpimg.imread('test_images\\straight_lines2.jpg')
-test_img = mpimg.imread('test_images\\test1.jpg')
+# test_img = mpimg.imread('test_images\\test1.jpg')
 # test_img = mpimg.imread('test_images\\test2.jpg')
 # test_img = mpimg.imread('test_images\\test3.jpg')
 # test_img = mpimg.imread('test_images\\test4.jpg')
 # test_img = mpimg.imread('test_images\\test5.jpg')
 # test_img = mpimg.imread('test_images\\test6.jpg')
 
-result = process_image(test_img)
-plt.imshow(result)
-plt.show()
+# Problem frames from the project video
+# test_img = mpimg.imread('test_images\\test7.jpg') # Image with a shadow of a tree and lane color change simultaneously.
+# test_img = mpimg.imread('test_images\\test8.jpg')
+# test_img = mpimg.imread('test_images\\test9.jpg')
+# test_img = mpimg.imread('test_images\\test10.jpg')
+#
+# result = process_image(test_img)
+# # plt.imshow(result)
+# # plt.show()
 
 # ************** End of Test Image Section **************** #
 
 # Uncomment next 5 lines for the project video
-# white_output = 'output_images\\project_video.mp4'
-# clip1 = VideoFileClip('project_video.mp4')
-# # new_clip = clip1.subclip(38, 45)
-# white_clip = clip1.fl_image(process_image)
-# white_clip.write_videofile(white_output, audio=False)
+white_output = 'project_video_output.mp4'
+clip1 = VideoFileClip('project_video.mp4')
+# new_clip = clip1.subclip(19, 26)
+white_clip = clip1.fl_image(process_image)
+white_clip.write_videofile(white_output, audio=False)
 
 # Uncomment next 4 lines for the challenge video
 # Please note that the pipeline is not yet optimized for challenge videos
