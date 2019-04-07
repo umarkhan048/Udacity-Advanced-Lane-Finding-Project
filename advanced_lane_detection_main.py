@@ -278,8 +278,8 @@ def search_around_polynomial(binary_warped, left_fit_prev, right_fit_prev):
     result = cv2.addWeighted(out_img, 1, window_img, 0.3, 0)
 
     # Plot the polynomial lines onto the image
-    plt.plot(left_fit_x, ploty, color='yellow')
-    plt.plot(right_fit_x, ploty, color='yellow')
+    # plt.plot(left_fit_x, ploty, color='yellow')
+    # plt.plot(right_fit_x, ploty, color='yellow')
     # End visualization steps ##
 
     return result, left_fit_x, right_fit_x, ploty, left_fit, right_fit
@@ -298,8 +298,6 @@ def sanity_checks(left_fit_x, right_fit_x, ploty):
     left_max = max(left_fit_x) * xm_per_pix
     right_max = max(right_fit_x) * xm_per_pix
 
-    # Pick highest points in the image for the left and right sides and calculate distance
-
     # If y coordinates are the same, the distance formula reduces to only x terms
     distance_low = np.sqrt((right_min - left_min)**2)
     distance_high = np.sqrt((right_max - left_max)**2)
@@ -313,11 +311,6 @@ def sanity_checks(left_fit_x, right_fit_x, ploty):
         return True
     else:
         return False
-
-    # Check similarity of curvature
-    #left_line_rad, right_line_rad = measure_curvature(left_fit_x, right_fit_x, ploty)
-
-    # Check if the lines are roughly parallel
 
 
 def measure_curvature_dist(binary_warped, left_fit_in, right_fit_in):
@@ -353,7 +346,7 @@ def measure_curvature_dist(binary_warped, left_fit_in, right_fit_in):
     return (left_curverad + right_curverad)/2, dist_from_center
 
 
-def draw_on_image(warped_img, left_fitx, right_fitx, ploty, Minv, undist, image, frame_bool):
+def draw_on_image(warped_img, left_fitx, right_fitx, ploty, Minv, undist, image):
     # Create an image to draw the lines on
     warp_zero = np.zeros_like(warped_img).astype(np.uint8)
     color_warp = np.dstack((warp_zero, warp_zero, warp_zero))
@@ -364,10 +357,8 @@ def draw_on_image(warped_img, left_fitx, right_fitx, ploty, Minv, undist, image,
     pts = np.hstack((pts_left, pts_right))
 
     # Draw the lane onto the warped blank image
-    if frame_bool:
-        cv2.fillPoly(color_warp, np.int_([pts]), (0, 255, 0))
-    else:
-        cv2.fillPoly(color_warp, np.int_([pts]), (255, 0, 0))
+    cv2.fillPoly(color_warp, np.int_([pts]), (0, 255, 0))
+
 
     # Warp the blank back to original image space using inverse perspective matrix (Minv)
     newwarp = cv2.warpPerspective(color_warp, Minv, (image.shape[1], image.shape[0]))
@@ -405,31 +396,20 @@ def process_image(image):
 
     # Perform sanity checks based on left and right lane points
     frame_bool = sanity_checks(left_fit_x, right_fit_x, ploty)
-    # return polyfit_img
-    result = draw_on_image(transformed_img, left_fit_x, right_fit_x, ploty, Minv, undist, image, frame_bool)
 
+    #if frame_bool:
+    result = draw_on_image(transformed_img, left_fit_x, right_fit_x, ploty, Minv, undist, image)
     # Write lane curvature on the frame
-    cv2.putText(result, 'Radius of curvature: ' + str(int(avg_lane_curve)) + 'm', (50, 50), cv2.FONT_HERSHEY_SIMPLEX,
-                1, (255, 255, 255), 2)
-    cv2.putText(result, 'Deviation from lane center: ' + str(dist_center) + 'm', (50, 100), cv2.FONT_HERSHEY_SIMPLEX,
-                1, (255, 255, 255), 2)
+    cv2.putText(result, 'Radius of curvature: ' + str(int(avg_lane_curve)) + 'm', (50, 50),
+                cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+    cv2.putText(result, 'Deviation from lane center: ' + str(dist_center) + 'm', (50, 100),
+                cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+
     return result
+    #else:
+        # For now, when the sanity check does not pass, an unprocessed undistorted image is returned
+    #    return undist
 
-    # if frame_bool:
-    #     result = draw_on_image(transformed_img, left_fit_x, right_fit_x, ploty, Minv, undist, image, frame_bool)
-    #
-    #     # Write lane curvature on the frame
-    #     cv2.putText(result, 'Radius of curvature: ' + str(int(avg_lane_curve)) + 'm', (50, 50), cv2.FONT_HERSHEY_SIMPLEX,
-    #                 1, (255, 255, 255), 2)
-    #     return result
-    # else:
-    #     # For now, when the sanity check does not pass, an unprocessed undistorted image is returned
-    #     # THIS IS A TEMPORARY SOLUTION
-    #     return undist
-
-    # left_curve_radius, right_curve_radius, left_fit, right_fit = measure_curvature(ploty, left_fit_x, right_fit_x)
-    # left_fit_array.append(left_fit)
-    # right_fit_array.append(right_fit)
 
 # ************** Start of Test Image Section ************** #
 
@@ -452,8 +432,8 @@ def process_image(image):
 # test_img = mpimg.imread('test_images\\test10.jpg')
 #
 # result = process_image(test_img)
-# # plt.imshow(result)
-# # plt.show()
+# plt.imshow(result)
+# plt.show()
 
 # ************** End of Test Image Section **************** #
 
