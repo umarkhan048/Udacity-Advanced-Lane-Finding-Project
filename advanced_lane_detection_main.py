@@ -338,8 +338,8 @@ def measure_curvature_dist(binary_warped, left_fit_in, right_fit_in):
     img_center = binary_warped.shape[1] / 2
 
     # Lane center is the mid point at the highest value of y i.e. y_eval
-    lowest_left_lane = (left_fit_in[0] * y_eval)**2 + left_fit_in[1] * y_eval + left_fit_in[2]
-    lowest_right_lane =(right_fit_in[0] * y_eval)**2 + right_fit_in[1] * y_eval + right_fit_in[2]
+    lowest_left_lane = (left_fit_in[0] * y_eval**2) + left_fit_in[1] * y_eval + left_fit_in[2]
+    lowest_right_lane =(right_fit_in[0] * y_eval**2) + right_fit_in[1] * y_eval + right_fit_in[2]
     lane_center = (lowest_right_lane + lowest_left_lane) / 2
     dist_from_center = round((img_center - lane_center) * xm_per_pix, 3)
 
